@@ -1,0 +1,21 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-moments-dev-0cc2a-authRole",
+      "UnauthRoleArn": "arn:aws:iam::719436962437:role/amplify-moments-dev-0cc2a-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::719436962437:role/amplify-moments-dev-0cc2a-authRole",
+      "Region": "us-east-1",
+      "DeploymentBucketName": "amplify-moments-dev-0cc2a-deployment",
+      "UnauthRoleName": "amplify-moments-dev-0cc2a-unauthRole",
+      "StackName": "amplify-moments-dev-0cc2a",
+      "StackId": "arn:aws:cloudformation:us-east-1:719436962437:stack/amplify-moments-dev-0cc2a/d7cb3b30-28fe-11f0-b6d7-0affc71f8aa9",
+      "AmplifyAppId": "difjr0efevy7d",
+      "APIGatewayAuthURL": "https://s3.amazonaws.com/amplify-moments-dev-0cc2a-deployment/amplify-cfn-templates/api/APIGatewayAuthStack.json"
+    },
+    "categories": {
+      "auth": {
+        "moments": {}
+      }
+    }
+  }
+}
