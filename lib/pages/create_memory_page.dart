@@ -1,12 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../providers.dart';
+import '../models/moment.dart';
+import '../widgets/bottom_nav_bar.dart';
+import 'moment_detail_page.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'dart:convert';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import '../services/storage_service.dart';
 
-class CreateMemoryPage extends StatefulWidget {
+class CreateMemoryPage extends ConsumerStatefulWidget {
+  final Moment? moment;
+  const CreateMemoryPage({Key? key, this.moment}) : super(key: key);
+
   @override
   _CreateMemoryPageState createState() => _CreateMemoryPageState();
 }
 
-class _CreateMemoryPageState extends State<CreateMemoryPage> {
-  int _currentStep = 0;
+class _CreateMemoryPageState extends ConsumerState<CreateMemoryPage> {
   final _formKey = GlobalKey<FormState>();
   String selectedTone = 'reflective';
   bool isDraft = false;
@@ -17,13 +33,29 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
   final TextEditingController _promptController = TextEditingController();
 
   // List of materials
-  final List<MaterialItem> materials = [];
+  late List<MaterialItem> materials;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  int? _playingIndex;
+  bool _isPlaying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize materials from existing moment or empty list
+    materials = widget.moment?.materials.toList() ?? [];
+    
+    // Pre-populate title if editing
+    if (widget.moment?.title != null) {
+      _titleController.text = widget.moment!.title!;
+    }
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
     _notesController.dispose();
     _promptController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -31,14 +63,74 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => AddMaterialModal(
-        onAddMaterial: (MaterialItem material) {
+        onAddMaterial: (MaterialItem material, String? imagePath) async {
+          print('[CreateMemoryPage] onAddMaterial called with material: \\${material.title}, imagePath: \\${imagePath}');
           setState(() {
             materials.add(material);
           });
+          print('[CreateMemoryPage] materials list now: \\${materials.map((m) => m.title).toList()}');
+
+          // Aggregate all transcripts
+          final allTranscripts = materials
+              .where((m) => m.transcript != null && m.transcript!.isNotEmpty)
+              .map((m) => m.transcript!)
+              .join(' ');
+
+          String? newTitle;
+          if (allTranscripts.isNotEmpty) {
+            try {
+              final sttService = ref.read(sttServiceProvider);
+              newTitle = await sttService.generateShortTitle(allTranscripts);
+            } catch (e) {
+              newTitle = null;
+            }
+          }
+
+          Moment? savedMoment;
+          // If we're editing an existing moment, update it
+          if (widget.moment != null) {
+            final storageService = ref.read(storageServiceProvider);
+            widget.moment!.materials = materials.toList();
+            if (newTitle != null && newTitle.isNotEmpty) {
+              widget.moment!.title = newTitle;
+            }
+            await storageService.saveMoment(widget.moment!);
+            ref.refresh(momentsProvider);
+            savedMoment = widget.moment!;
+          } else {
+            // If creating a new moment, create and save it
+            final storageService = ref.read(storageServiceProvider);
+            print('Saving new moment with imagePath: $imagePath');
+            final moment = Moment.create(
+              title: newTitle ?? 'New Moment',
+              materials: materials.toList(),
+              imagePath: imagePath,
+            );
+            await storageService.saveMoment(moment);
+            ref.refresh(momentsProvider);
+            savedMoment = moment;
+            // Print all moments' imagePath values
+            final allMoments = await storageService.getAllMoments();
+            for (final m in allMoments) {
+              print('Moment: \\${m.title}, imagePath: \\${m.imagePath}');
+            }
+          }
+
+          // If the material has a transcript, generate the image in the background
+          if (material.transcript != null && material.transcript!.isNotEmpty && savedMoment != null) {
+            final sttService = ref.read(sttServiceProvider);
+            StorageService.generateImageAndUpdateMoment(
+              momentId: savedMoment.id,
+              transcript: material.transcript!,
+              sttService: sttService,
+              onMomentUpdated: () => ref.refresh(momentsProvider),
+            );
+          }
         },
       ),
     );
@@ -53,657 +145,262 @@ class _CreateMemoryPageState extends State<CreateMemoryPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Create Memory',
+          widget.moment != null ? 'Edit moment' : 'Create moment',
           style: TextStyle(
-            color: Color.fromARGB(255, 6, 154, 102),
+            color: Color(0xFF3730A3),
             fontSize: 24,
           ),
         ),
         actions: [
-          // Save Draft Button
-          TextButton.icon(
-            onPressed: () {
-              setState(() {
-                isDraft = true;
-              });
-              // TODO: Implement save draft functionality
-            },
-            icon: Icon(Icons.save_outlined),
-            label: Text('Save Draft'),
-          ),
-          // Finish Button
-          TextButton.icon(
-            onPressed: _currentStep == 3 ? () {
-              // TODO: Implement finish functionality
-            } : null,
-            icon: Icon(Icons.check),
-            label: Text('Finish & Generate'),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Custom Horizontal Stepper
-          Container(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(4, (index) {
-                bool isActive = _currentStep == index;
-                bool isPast = _currentStep > index;
-                return Row(
-                  children: [
-                    Column(
-                      children: [
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: isPast || isActive
-                                ? Color.fromARGB(255, 6, 154, 102)
-                                : Colors.grey[300],
-                            shape: BoxShape.circle,
+          // Delete icon
+          if (widget.moment != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: IconButton(
+                icon: Icon(Icons.delete_outline, color: Colors.grey[600]),
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: Text('Delete Moment'),
+                      content: Text('Are you sure you want to delete this moment and all its materials?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: Text('Cancel'),
                           ),
-                          child: isPast
-                              ? Icon(Icons.check, color: Colors.white, size: 16)
-                              : Center(
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      color: isActive ? Colors.white : Colors.grey[600],
-                                      fontWeight: FontWeight.bold,
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: Text('Delete', style: TextStyle(color: Colors.red)),
                                     ),
-                                  ),
-                                ),
-                        ),
-                        if (isActive) ...[
-                          SizedBox(height: 4),
-                          Text(
-                            _getStepTitle(index),
-                            style: TextStyle(
-                              color: Color.fromARGB(255, 6, 154, 102),
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
                       ],
-                    ),
-                    if (index < 3)
-                      Container(
-                        width: 40,
-                        height: 1,
-                        color: isPast
-                            ? Color.fromARGB(255, 6, 154, 102)
-                            : Colors.grey[300],
-                      ),
-                  ],
-                );
-              }),
+                                ),
+                  );
+                  if (confirm == true) {
+                    final storageService = ref.read(storageServiceProvider);
+                    // Delete associated files
+                    for (final material in widget.moment!.materials) {
+                      if (material.type == MomentMaterialType.voice) {
+                        final file = File(material.content);
+                        if (await file.exists()) {
+                          await file.delete();
+                        }
+                      }
+                    }
+                    // Delete generated image if not santorini
+                    final imagePath = widget.moment!.imagePath;
+                    if (imagePath != null && imagePath.isNotEmpty && !imagePath.startsWith('assets/')) {
+                      final imgFile = File(imagePath);
+                      if (await imgFile.exists()) {
+                        await imgFile.delete();
+                      }
+                    }
+                    // Delete moment from Hive
+                    await storageService.deleteMoment(widget.moment!.id);
+                    ref.refresh(momentsProvider);
+                    if (mounted) Navigator.pop(context);
+                  }
+                },
             ),
           ),
-          
-          // Step Content
-          Expanded(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: _buildStepContent(_currentStep),
+          // Add icon
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+            child: GestureDetector(
+              onTap: _showAddMaterialModal,
+              child: CircleAvatar(
+                backgroundColor: Color(0xFF4F46E5),
+                radius: 20,
+                child: Icon(Icons.add, color: Colors.white),
               ),
             ),
-          ),
-          
-          // Bottom Navigation
-          Container(
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: Offset(0, -2),
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (_currentStep > 0)
-                  TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _currentStep--;
-                      });
-                    },
-                    icon: Icon(Icons.arrow_back),
-                    label: Text('Back'),
-                  )
-                else
-                  SizedBox.shrink(),
-                ElevatedButton(
-                  onPressed: () {
-                    if (_currentStep < 3) {
-                      setState(() {
-                        _currentStep++;
-                      });
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color.fromARGB(255, 6, 154, 102),
-                    foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                  ),
-                  child: Text(_currentStep == 3 ? 'Finish' : 'Continue'),
-                ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Color(0xFFEEF2FF),
+              Color(0xFFEDE9FE),
               ],
             ),
           ),
-        ],
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: _buildAddMaterialsStep(),
+        ),
+      ),
+      bottomNavigationBar: BottomNavBar(
+        currentIndex: 0,
+        onTap: (index) {
+          // TODO: handle navigation
+        },
       ),
     );
-  }
-
-  Widget _buildStepContent(int step) {
-    switch (step) {
-      case 0:
-        return _buildAddMaterialsStep();
-      case 1:
-        return _buildOrganizeContentStep();
-      case 2:
-        return _buildAISettingsStep();
-      case 3:
-        return _buildReviewAndPublishStep();
-      default:
-        return Container();
-    }
   }
 
   Widget _buildAddMaterialsStep() {
-    return Column(
+    return Form(
+      key: _formKey,
+      child: Column(
       children: [
-        // List of materials
-        Container(
-          height: 400,
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ListView.builder(
-            itemCount: materials.length + 1, // +1 for the add button
-            itemBuilder: (context, index) {
-              if (index == materials.length) {
-                // Add new material button
-                return ListTile(
-                  onTap: _showAddMaterialModal,
-                  leading: CircleAvatar(
-                    backgroundColor: Color.fromARGB(255, 6, 154, 102),
-                    child: Icon(Icons.add, color: Colors.white),
-                  ),
-                  title: Text('Add New Material',
-                      style: TextStyle(
-                        color: Color.fromARGB(255, 6, 154, 102),
-                        fontWeight: FontWeight.bold,
-                      )),
+          const SizedBox(height: 16),
+          _buildMaterialsList(),
+        ],
+      ),
                 );
               }
               
-              final material = materials[index];
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Color.fromARGB(255, 6, 154, 102).withOpacity(0.1),
-                  child: Icon(
-                    material.type.icon,
-                    color: Color.fromARGB(255, 6, 154, 102),
-                  ),
-                ),
-                title: Text(material.title),
-                subtitle: Text(material.type.label),
-                trailing: IconButton(
-                  icon: Icon(Icons.delete_outline),
-                  onPressed: () {
-                    setState(() {
-                      materials.removeAt(index);
-                    });
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOrganizeContentStep() {
+  Widget _buildMaterialsList() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Drag items to reorder your story',
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.grey[600],
-          ),
-        ),
-        SizedBox(height: 16),
-        Container(
-          height: 400,
+        ListView.builder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          itemCount: materials.length,
+          itemBuilder: (context, index) {
+            final material = materials[index];
+            return Container(
+              margin: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.grey[100],
+                color: Colors.white,
             borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              constraints: BoxConstraints(minHeight: 66),
+              child: Row(
+                children: [
+                  // Play/Pause Icon
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: CircleAvatar(
+                      backgroundColor: Color(0xFFE0E7FF),
+                      child: IconButton(
+                        icon: Icon(
+                          (_playingIndex == index && _isPlaying)
+                              ? Icons.pause
+                              : Icons.play_arrow,
+                          color: Color(0xFF4F46E5),
           ),
-          child: materials.isEmpty
-              ? Center(
-                  child: Text(
-                    'Add some materials in the previous step',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 16,
+                        onPressed: () async {
+                          if (_playingIndex == index && _isPlaying) {
+                            setState(() {
+                              _isPlaying = false;
+                              _playingIndex = null;
+                            });
+                            await _audioPlayer.pause();
+                          } else {
+                            setState(() {
+                              _playingIndex = index;
+                              _isPlaying = true;
+                            });
+                            try {
+                              await _audioPlayer.stop();
+                              await _audioPlayer.setFilePath(material.content);
+                              await _audioPlayer.play();
+                              _audioPlayer.playerStateStream.listen((state) {
+                                if (state.processingState == ProcessingState.completed) {
+                                  setState(() {
+                                    _isPlaying = false;
+                                    _playingIndex = null;
+                                  });
+                                }
+                              });
+                            } catch (_) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Could not play audio.')),
+                              );
+                            }
+                          }
+                        },
+                      ),
                     ),
-                  ),
-                )
-              : ReorderableListView.builder(
-                  itemCount: materials.length,
-                  onReorder: (oldIndex, newIndex) {
-                    setState(() {
-                      if (newIndex > oldIndex) {
-                        newIndex -= 1;
-                      }
-                      final item = materials.removeAt(oldIndex);
-                      materials.insert(newIndex, item);
-                    });
-                  },
-                  itemBuilder: (context, index) {
-                    final material = materials[index];
-                    return Card(
-                      key: ValueKey(material.hashCode),
-                      margin: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      child: ListTile(
-                        leading: Container(
-                          decoration: BoxDecoration(
-                            color: Color.fromARGB(255, 6, 154, 102).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          padding: EdgeInsets.all(8),
-                          child: Icon(
-                            material.type.icon,
-                            color: Color.fromARGB(255, 6, 154, 102),
-                          ),
-                        ),
-                        title: Text(material.title),
-                        subtitle: Text(material.content.length > 50
-                            ? '${material.content.substring(0, 50)}...'
-                            : material.content),
-                        trailing: Icon(Icons.drag_handle),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        if (materials.isNotEmpty) ...[
-          SizedBox(height: 16),
-          Text(
-            '👆 Drag items up or down to change their order',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildAISettingsStep() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Ready to create your memory?',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        SizedBox(height: 16),
-        TextField(
-          controller: _promptController,
-          maxLines: 3,
-          decoration: InputDecoration(
-            labelText: 'Customize AI Prompt',
-            hintText: 'Make it emotional and nostalgic...',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        SizedBox(height: 16),
-        Text('Choose Tone:', style: TextStyle(fontSize: 16)),
-        _buildToneSelector(),
-      ],
-    );
-  }
-
-  Widget _buildReviewAndPublishStep() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Memory Preview Card
-        Card(
-          margin: EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Memory Title
-              Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  '🗂️ That Unforgettable Sunset in Santorini',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+              ),
+                  // Body of the tile (navigates to detail)
+                  Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => MomentDetailPage(
+                              moment: Moment.create(
+                                title: material.title,
+                                materials: [material],
                   ),
                 ),
               ),
-              
-              // Main Image
-              Container(
-                height: 200,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  image: DecorationImage(
-                    image: AssetImage('assets/images/santorini.jpg'),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-              
-              // Memory Paragraphs
-              _buildMemoryParagraph(
-                'We had just arrived in Oia, and the air smelled like salt and summer. '
-                'The golden hour had just begun, casting a honeyed light over the whitewashed '
-                'rooftops and cobalt-blue domes. Nina couldn\'t stop smiling—it was her dream destination.',
-                128,
-                7,
-                hasVoice: true,
-              ),
-              
-              _buildMediaPlaceholder(
-                icon: Icons.mic,
-                label: 'Voice Clip: Nina gasping at the first view of Santorini',
-              ),
-              
-              _buildMemoryParagraph(
-                'We found this quiet cliffside café, tucked behind a winding alley near Byzantine '
-                'Castle Ruins. Arash ordered iced coffee, but spilled half of it laughing at one of '
-                'Ramin\'s awful puns.',
-                94,
-                4,
-              ),
-              
-              _buildMediaPlaceholder(
-                icon: Icons.videocam,
-                label: 'Video: Ramin telling a joke, everyone laughing',
-              ),
-              
-              _buildMemoryParagraph(
-                'That night, we sat on the ledge overlooking the sea. Someone started humming '
-                '"Here Comes the Sun," and it just felt... right. Nina leaned her head on my shoulder. '
-                'I wanted to freeze time.',
-                172,
-                11,
-                hasAudio: true,
-              ),
-              
-              _buildMemoryParagraph(
-                'The stars slowly came out, one by one. Arash pointed out constellations. He always '
-                'does that—says he\'s "anchoring the moment to the sky." We stayed there till the wind '
-                'got cold and the town quieted down.',
-                112,
-                6,
-              ),
-              
-              _buildMemoryParagraph(
-                'The best part? We recorded it all. Voices, jokes, footsteps, laughter—and now, '
-                'reading this, hearing it again… it\'s like going back.',
-                135,
-                8,
-              ),
-              
-              _buildMediaPlaceholder(
-                icon: Icons.videocam,
-                label: 'Video: Clip of everyone saying goodbye to Santorini',
-              ),
-              
-              // Quote
-              Container(
-                padding: EdgeInsets.all(16),
-                alignment: Alignment.center,
-                child: Text(
-                  '"Some moments don\'t need filters\u2014they just need to be remembered."',
-                  style: TextStyle(
-                    fontStyle: FontStyle.italic,
-                    fontSize: 16,
-                    color: Colors.grey[700],
-                  ),
-                ),
-              ),
-              
-              // Metadata
-              Padding(
-                padding: EdgeInsets.all(16),
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('🕓 Created: Aug 23, 2024  ✏️ Last Edited: Sep 5, 2024'),
-                    SizedBox(height: 8),
-                    Text('👥 Contributors: Nina, Arash, Ramin'),
-                  ],
-                ),
+                            Text(material.title),
+                            SizedBox(height: 4),
+                            Text(
+                              material.type == MomentMaterialType.voice && material.transcript != null
+                                  ? 'Voice & Transcript'
+                                  : material.type.label,
+                              style: TextStyle(color: Colors.grey[700], fontSize: 13),
               ),
             ],
           ),
         ),
-        
-        // Action Buttons
-        Padding(
-          padding: EdgeInsets.all(16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              ElevatedButton.icon(
+                    ),
+                  ),
+                  // Delete button
+                  IconButton(
+                    icon: Icon(Icons.delete_outline),
                 onPressed: () {
-                  // TODO: Implement regeneration
-                },
-                icon: Icon(Icons.refresh),
-                label: Text('Regenerate'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.grey[200],
-                  foregroundColor: Colors.black87,
-                ),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  // TODO: Implement save
-                },
-                icon: Icon(Icons.save),
-                label: Text('Save'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Color.fromARGB(255, 6, 154, 102),
-                  foregroundColor: Colors.white,
-                ),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  // TODO: Implement share
-                },
-                icon: Icon(Icons.share),
-                label: Text('Share'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.grey[200],
-                  foregroundColor: Colors.black87,
-                ),
+                      setState(() {
+                        materials.removeAt(index);
+                      });
+                      // Update the moment in storage
+                      if (widget.moment != null) {
+                        final storageService = ref.read(storageServiceProvider);
+                        widget.moment!.materials = materials.toList();
+                        storageService.saveMoment(widget.moment!);
+                        ref.refresh(momentsProvider);
+                      }
+                    },
               ),
             ],
           ),
+            );
+          },
         ),
       ],
     );
   }
-
-  Widget _buildMemoryParagraph(String text, int likes, int comments, {bool hasVoice = false, bool hasAudio = false}) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            text,
-            style: TextStyle(fontSize: 16, height: 1.5),
-          ),
-          SizedBox(height: 8),
-          Row(
-            children: [
-              InkWell(
-                onTap: () {
-                  // TODO: Implement like functionality
-                },
-                child: Row(
-                  children: [
-                    Icon(Icons.favorite_border, size: 20, color: Colors.grey[600]),
-                    SizedBox(width: 4),
-                    Text('$likes', style: TextStyle(color: Colors.grey[600])),
-                  ],
-                ),
-              ),
-              SizedBox(width: 16),
-              InkWell(
-                onTap: () {
-                  // TODO: Implement comment functionality
-                },
-                child: Row(
-                  children: [
-                    Icon(Icons.mic, size: 20, color: Colors.grey[600]),
-                    SizedBox(width: 4),
-                    Text('$comments Voice Comments', style: TextStyle(color: Colors.grey[600])),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMediaPlaceholder({required IconData icon, required String label}) {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.grey[600]),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildToneSelector() {
-    return Wrap(
-      spacing: 8,
-      children: [
-        _buildToneChip('🎉 Fun & Light', 'fun'),
-        _buildToneChip('🧘 Reflective & Calm', 'reflective'),
-        _buildToneChip('🧠 Detailed & Factual', 'detailed'),
-        _buildToneChip('💜 Sentimental & Heartfelt', 'sentimental'),
-      ],
-    );
-  }
-
-  Widget _buildToneChip(String label, String value) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selectedTone == value,
-      onSelected: (bool selected) {
-        setState(() {
-          selectedTone = selected ? value : selectedTone;
-        });
-      },
-    );
-  }
-
-  String _getStepTitle(int index) {
-    switch (index) {
-      case 0:
-        return 'Add Materials';
-      case 1:
-        return 'Organize Content';
-      case 2:
-        return 'AI Settings';
-      case 3:
-        return 'Review & Publish';
-      default:
-        return '';
-    }
-  }
-}
-
-// Material Type Enum
-enum MaterialType {
-  text(Icons.text_fields, 'Text'),
-  image(Icons.image, 'Image'),
-  video(Icons.videocam, 'Video'),
-  voice(Icons.mic, 'Voice');
-
-  final IconData icon;
-  final String label;
-  const MaterialType(this.icon, this.label);
-}
-
-// Material Item Class
-class MaterialItem {
-  final String title;
-  final MaterialType type;
-  final String content;
-
-  MaterialItem({
-    required this.title,
-    required this.type,
-    required this.content,
-  });
 }
 
 // Add Material Modal
-class AddMaterialModal extends StatefulWidget {
-  final Function(MaterialItem) onAddMaterial;
+class AddMaterialModal extends ConsumerStatefulWidget {
+  final Function(MaterialItem, String?) onAddMaterial;
 
-  const AddMaterialModal({Key? key, required this.onAddMaterial}) : super(key: key);
+  const AddMaterialModal({super.key, required this.onAddMaterial});
 
   @override
   _AddMaterialModalState createState() => _AddMaterialModalState();
 }
 
-class _AddMaterialModalState extends State<AddMaterialModal> {
+class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
   final TextEditingController _textController = TextEditingController();
   final List<MaterialItem> tempMaterials = [];
+  bool _isRecording = false;
+  int _selectedStyle = -1;
+  bool _isGeneratingImage = false;
 
   @override
   void dispose() {
@@ -711,16 +408,146 @@ class _AddMaterialModalState extends State<AddMaterialModal> {
     super.dispose();
   }
 
+  Future<void> _toggleRecording() async {
+    if (_isGeneratingImage) return; // Prevent recording while generating image
+    // Access capture service via Riverpod
+    final captureService = ref.read(captureServiceProvider);
+
+    if (!_isRecording) {
+      final hasPermission = await captureService.checkPermission();
+      if (!hasPermission) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission not granted')),
+          );
+        }
+        print('[AddMaterialModal] Microphone permission not granted');
+        return;
+      }
+
+      await captureService.startRecording();
+      print('[AddMaterialModal] Started recording');
+      if (mounted) {
+        setState(() => _isRecording = true);
+      }
+    } else {
+      final path = await captureService.stopRecording();
+      print('[AddMaterialModal] Stopped recording, path: \\${path}');
+      if (mounted) {
+        setState(() => _isRecording = false);
+      }
+
+      if (path != null) {
+        // Show a snackbar while transcribing
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Transcribing audio...')),
+          );
+        }
+
+        String? transcript;
+        String title = 'Voice Clip \\${tempMaterials.length + 1}';
+        String? imagePath;
+        try {
+          final sttService = ref.read(sttServiceProvider);
+          transcript = await sttService.transcribe(path);
+          print('[AddMaterialModal] Transcript: \\${transcript}');
+          if (transcript != null && transcript.isNotEmpty) {
+            title = await sttService.generateShortTitle(transcript);
+            print('[AddMaterialModal] Generated title: \\${title}');
+            if (mounted) {
+              setState(() => _isGeneratingImage = true);
+            }
+            // Save the material and moment immediately, with fallback image
+            imagePath = 'assets/images/santorini.jpg';
+            final voiceMaterial = MaterialItem(
+              title: title,
+              type: MomentMaterialType.voice,
+              content: path,
+              transcript: transcript,
+            );
+            print('[AddMaterialModal] Calling onAddMaterial with: \\${voiceMaterial.title}, imagePath: \\${imagePath}');
+            if (mounted) {
+              setState(() {
+                tempMaterials.add(voiceMaterial);
+              });
+            }
+            widget.onAddMaterial(voiceMaterial, imagePath);
+            print('[AddMaterialModal] Modal closing after add');
+            if (mounted) Navigator.of(context).pop();
+            // Generate image in background
+            _generateAndUpdateImage(transcript, path);
+          } else {
+            // If no transcript, fallback to static image
+            imagePath = 'assets/images/santorini.jpg';
+            final voiceMaterial = MaterialItem(
+              title: title,
+              type: MomentMaterialType.voice,
+              content: path,
+              transcript: transcript,
+            );
+            print('[AddMaterialModal] No transcript, calling onAddMaterial with: \\${voiceMaterial.title}, imagePath: \\${imagePath}');
+            if (mounted) {
+              setState(() {
+                tempMaterials.add(voiceMaterial);
+              });
+            }
+            widget.onAddMaterial(voiceMaterial, imagePath);
+            print('[AddMaterialModal] Modal closing after add (no transcript)');
+            if (mounted) Navigator.of(context).pop();
+          }
+        } catch (e) {
+          print('[AddMaterialModal] Error during transcription or add: \\${e}');
+          if (mounted) {
+            setState(() => _isGeneratingImage = false);
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _generateAndUpdateImage(String transcript, String path) async {
+    try {
+      final sttService = ref.read(sttServiceProvider);
+      final generatedImagePath = await sttService.generateImage(
+        'A concept illustration of: $transcript',
+        'moment_\\${DateTime.now().millisecondsSinceEpoch}'
+      );
+      if (generatedImagePath != null) {
+        // Update the moment in Hive with the new imagePath
+        final storageService = ref.read(storageServiceProvider);
+        final allMoments = await storageService.getAllMoments();
+        // Find the most recent moment (by createdAt)
+        allMoments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        final latestMoment = allMoments.firstWhere(
+          (m) => m.materials.isNotEmpty && m.materials.last.content == path,
+          orElse: () => allMoments.first,
+        );
+        latestMoment.imagePath = generatedImagePath;
+        await storageService.saveMoment(latestMoment);
+        // Refresh the provider to update the UI
+        ref.refresh(momentsProvider);
+        print('Updated moment imagePath to: $generatedImagePath');
+      }
+    } catch (e) {
+      print('Error generating image: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isGeneratingImage = false);
+      }
+    }
+  }
+
   void _addTextMaterial() {
     if (_textController.text.isNotEmpty) {
       final material = MaterialItem(
         title: 'Text Note ${tempMaterials.length + 1}',
-        type: MaterialType.text,
+        type: MomentMaterialType.text,
         content: _textController.text,
       );
       setState(() {
         tempMaterials.add(material);
-        widget.onAddMaterial(material);
+        widget.onAddMaterial(material, null);
         _textController.clear();
       });
     }
@@ -728,19 +555,49 @@ class _AddMaterialModalState extends State<AddMaterialModal> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(context).viewInsets.bottom + 16),
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 16,
+        ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            'Add New Material',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: _isGeneratingImage
+                    ? SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2.5,
+                        ),
+                      )
+                    : Icon(_isRecording ? Icons.stop : Icons.mic, color: Colors.white, size: 28),
+                label: Text(
+                  _isGeneratingImage
+                      ? 'Generating Picture...'
+                      : (_isRecording ? 'Stop Recording' : 'Start Recording'),
+                  style: TextStyle(fontSize: 20, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _isRecording ? Colors.red : Color(0xFF6366F1),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  elevation: 0,
+                ),
+                onPressed: _isGeneratingImage ? null : _toggleRecording,
             ),
           ),
-          SizedBox(height: 16),
+            const SizedBox(height: 16),
           Flexible(
             child: ListView.builder(
               shrinkWrap: true,
@@ -754,50 +611,9 @@ class _AddMaterialModalState extends State<AddMaterialModal> {
                 );
               },
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.image),
-                  onPressed: () {
-                    // TODO: Implement image picker
-                  },
-                ),
-                IconButton(
-                  icon: Icon(Icons.videocam),
-                  onPressed: () {
-                    // TODO: Implement video picker
-                  },
-                ),
-                IconButton(
-                  icon: Icon(Icons.mic),
-                  onPressed: () {
-                    // TODO: Implement voice recorder
-                  },
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    decoration: InputDecoration(
-                      hintText: 'Type your text here...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(Icons.send),
-                  onPressed: _addTextMaterial,
-                  color: Color.fromARGB(255, 6, 154, 102),
                 ),
               ],
             ),
-          ),
-        ],
       ),
     );
   }

@@ -7,7 +7,7 @@ class IntroPage extends StatelessWidget {
     return Scaffold(
       // 1. Blue app bar with menu, theme toggle and user icons
       appBar: AppBar(
-        backgroundColor: const Color.fromARGB(255, 6, 154, 102),
+        backgroundColor: const Color(0xFF3730A3),
         elevation: 0,
         leading: IconButton(
           icon: Icon(Icons.menu),
@@ -58,7 +58,7 @@ class IntroPage extends StatelessWidget {
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color.fromARGB(255, 6, 154, 102),
+                          backgroundColor: const Color(0xFF3730A3),
                           foregroundColor: Colors.white,
                           padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                           shape: RoundedRectangleBorder(
@@ -121,7 +121,7 @@ class IntroPage extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w500,
-                        color: Color.fromARGB(255, 6, 154, 102),
+                        color: const Color(0xFF3730A3),
                       ),
                     ),
                   ),
@@ -149,7 +149,7 @@ class IntroPage extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Color.fromARGB(255, 6, 154, 102),
+                      color: const Color(0xFF3730A3),
                     ),
                   ),
                   SizedBox(height: 12),
@@ -187,7 +187,7 @@ class IntroPage extends StatelessWidget {
         children: [
           Icon(
             icon,
-            color: Color.fromARGB(255, 6, 154, 102),
+            color: const Color(0xFF3730A3),
             size: 24,
           ),
           SizedBox(width: 12),
