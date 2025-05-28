@@ -6,10 +6,10 @@ import 'create_memory_page.dart';
 import 'moment_detail_page.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../widgets/bottom_nav_bar.dart';
-import 'dart:io';
 import 'package:amplify_flutter/amplify_flutter.dart';
 import '../services/token_storage_service.dart';
 import 'login_page.dart';
+import 'dart:io';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -23,6 +23,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _refreshMoments() async {
     // This will force the FutureProvider to reload
+    await ref.read(syncServiceProvider).pullFromServer();
     ref.refresh(momentsProvider);
     // Optionally, you can await the new data:
     await ref.read(momentsProvider.future);
@@ -50,6 +51,30 @@ class _HomePageState extends ConsumerState<HomePage> {
         );
       }
     }
+  }
+
+  Future<void> _testApiCall() async {
+    final syncService = ref.read(syncServiceProvider);
+
+    if (syncService.isSyncing) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sync already in progress…')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Starting sync…')),
+    );
+
+    await syncService.syncMoments();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Sync finished.')),
+    );
   }
 
   @override
@@ -96,6 +121,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                       isGridView = !isGridView;
                     });
                   },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.cloud_upload_outlined),
+                  color: const Color(0xFF3730A3),
+                  tooltip: 'Test API',
+                  onPressed: _testApiCall,
                 ),
               ],
             ),

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'models/moment.dart';
 import 'services/storage_service.dart';
+import 'services/migration_service.dart';
 import 'pages/create_memory_page.dart';
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
@@ -22,6 +23,14 @@ void main() async {
     await Amplify.addPlugin(authPlugin);
     await Amplify.configure(amplifyconfig);
     debugPrint('Amplify configured successfully');
+    
+    // Run migration after Amplify is configured
+    try {
+      await MigrationService.migrateToUserId();
+      debugPrint('Migration completed successfully');
+    } catch (e) {
+      debugPrint('Error during migration: $e');
+    }
   } on AmplifyAlreadyConfiguredException {
     debugPrint('Amplify was already configured.');
   } catch (e) {
@@ -69,42 +78,57 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _checkAuth() async {
-    // Read tokens from secure storage
-    final tokens = await TokenStorageService.readTokens();
-    final idToken = tokens['idToken'];
+    try {
+      // Try to refresh tokens if needed
+      final tokensRefreshed = await TokenStorageService.refreshTokensIfNeeded();
+      
+      if (tokensRefreshed) {
+        // If tokens were refreshed or are still valid, proceed to HomePage
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomePage()),
+        );
+        return;
+      }
 
-    bool hasValidToken = false;
-    if (idToken != null && idToken.isNotEmpty) {
-      try {
-        final parts = idToken.split('.');
-        if (parts.length == 3) {
-          final payloadMap = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
-          final exp = payloadMap['exp'];
-          if (exp is int) {
-            final expiry = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
-            if (expiry.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
-              // token is still valid (with 1 minute buffer)
-              hasValidToken = true;
+      // If tokens couldn't be refreshed, check existing tokens
+      final tokens = await TokenStorageService.readTokens();
+      final idToken = tokens['idToken'];
+
+      if (idToken != null && idToken.isNotEmpty) {
+        try {
+          final parts = idToken.split('.');
+          if (parts.length == 3) {
+            final payloadMap = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
+            final exp = payloadMap['exp'];
+            if (exp is int) {
+              final expiry = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+              if (expiry.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
+                // token is still valid (with 1 minute buffer)
+                if (!mounted) return;
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const HomePage()),
+                );
+                return;
+              }
             }
           }
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          print('Token decode error: $e');
+        } catch (e) {
+          if (kDebugMode) {
+            print('Token decode error: $e');
+          }
         }
       }
-    }
 
-    if (!mounted) return;
-
-    if (hasValidToken) {
-      // Navigate to HomePage
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomePage()),
-      );
-    } else {
-      // Clear any stored tokens then navigate to LoginPage
+      // If we get here, either tokens are invalid or don't exist
       await TokenStorageService.clearTokens();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => LoginPage()),
+      );
+    } catch (e) {
+      print('Error in auth check: $e');
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => LoginPage()),
       );
@@ -113,7 +137,6 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
-    // Simple splash screen / loader while checking
     return const Scaffold(
       body: Center(
         child: CircularProgressIndicator(),

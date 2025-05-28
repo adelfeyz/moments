@@ -13,6 +13,8 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../services/storage_service.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:amplify_flutter/amplify_flutter.dart';
 
 class CreateMemoryPage extends ConsumerStatefulWidget {
   final Moment? moment;
@@ -37,12 +39,14 @@ class _CreateMemoryPageState extends ConsumerState<CreateMemoryPage> {
   final AudioPlayer _audioPlayer = AudioPlayer();
   int? _playingIndex;
   bool _isPlaying = false;
+  Moment? _moment;   // holds the moment being created/edited
 
   @override
   void initState() {
     super.initState();
     // Initialize materials from existing moment or empty list
-    materials = widget.moment?.materials.toList() ?? [];
+    _moment = widget.moment;
+    materials = _moment?.materials.toList() ?? [];
     
     // Pre-populate title if editing
     if (widget.moment?.title != null) {
@@ -93,15 +97,15 @@ class _CreateMemoryPageState extends ConsumerState<CreateMemoryPage> {
 
           Moment? savedMoment;
           // If we're editing an existing moment, update it
-          if (widget.moment != null) {
+          if (_moment != null) {
             final storageService = ref.read(storageServiceProvider);
-            widget.moment!.materials = materials.toList();
+            _moment!.materials = materials.toList();
             if (newTitle != null && newTitle.isNotEmpty) {
-              widget.moment!.title = newTitle;
+              _moment!.title = newTitle;
             }
-            await storageService.saveMoment(widget.moment!);
+            await storageService.saveMoment(_moment!);
             ref.refresh(momentsProvider);
-            savedMoment = widget.moment!;
+            savedMoment = _moment!;
           } else {
             // If creating a new moment, create and save it
             final storageService = ref.read(storageServiceProvider);
@@ -110,10 +114,14 @@ class _CreateMemoryPageState extends ConsumerState<CreateMemoryPage> {
               title: newTitle ?? 'New Moment',
               materials: materials.toList(),
               imagePath: imagePath,
+              userId: (await Amplify.Auth.getCurrentUser()).userId,
             );
             await storageService.saveMoment(moment);
             ref.refresh(momentsProvider);
             savedMoment = moment;
+            setState(() {
+              _moment = moment;   // switch to edit mode so subsequent materials update same moment
+            });
             // Print all moments' imagePath values
             final allMoments = await storageService.getAllMoments();
             for (final m in allMoments) {
@@ -196,7 +204,7 @@ class _CreateMemoryPageState extends ConsumerState<CreateMemoryPage> {
                       }
                     }
                     // Delete moment from Hive
-                    await storageService.deleteMoment(widget.moment!.id);
+                    await storageService.markMomentDeleted(widget.moment!.id);
                     ref.refresh(momentsProvider);
                     if (mounted) Navigator.pop(context);
                   }
@@ -367,10 +375,10 @@ class _CreateMemoryPageState extends ConsumerState<CreateMemoryPage> {
                         materials.removeAt(index);
                       });
                       // Update the moment in storage
-                      if (widget.moment != null) {
+                      if (_moment != null) {
                         final storageService = ref.read(storageServiceProvider);
-                        widget.moment!.materials = materials.toList();
-                        storageService.saveMoment(widget.moment!);
+                        _moment!.materials = materials.toList();
+                        storageService.saveMoment(_moment!);
                         ref.refresh(momentsProvider);
                       }
                     },
@@ -425,12 +433,16 @@ class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
         return;
       }
 
+      // Enable wakelock before starting recording
+      await WakelockPlus.enable();
       await captureService.startRecording();
       print('[AddMaterialModal] Started recording');
       if (mounted) {
         setState(() => _isRecording = true);
       }
     } else {
+      // Disable wakelock after stopping recording
+      await WakelockPlus.disable();
       final path = await captureService.stopRecording();
       print('[AddMaterialModal] Stopped recording, path: \\${path}');
       if (mounted) {
@@ -509,26 +521,26 @@ class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
   Future<void> _generateAndUpdateImage(String transcript, String path) async {
     try {
       final sttService = ref.read(sttServiceProvider);
-      final generatedImagePath = await sttService.generateImage(
-        'A concept illustration of: $transcript',
-        'moment_\\${DateTime.now().millisecondsSinceEpoch}'
+      final storageService = ref.read(storageServiceProvider);
+      final allMoments = await storageService.getAllMoments();
+      // Find the most recent moment (by createdAt)
+      allMoments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final latestMoment = allMoments.firstWhere(
+        (m) => m.materials.isNotEmpty && m.materials.last.content == path,
+        orElse: () => allMoments.first,
       );
-      if (generatedImagePath != null) {
-        // Update the moment in Hive with the new imagePath
-        final storageService = ref.read(storageServiceProvider);
-        final allMoments = await storageService.getAllMoments();
-        // Find the most recent moment (by createdAt)
-        allMoments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        final latestMoment = allMoments.firstWhere(
-          (m) => m.materials.isNotEmpty && m.materials.last.content == path,
-          orElse: () => allMoments.first,
-        );
-        latestMoment.imagePath = generatedImagePath;
-        await storageService.saveMoment(latestMoment);
-        // Refresh the provider to update the UI
-        ref.refresh(momentsProvider);
-        print('Updated moment imagePath to: $generatedImagePath');
-      }
+
+      // Use StorageService's static method for background image generation
+      StorageService.generateImageAndUpdateMoment(
+        momentId: latestMoment.id,
+        transcript: transcript,
+        sttService: sttService,
+        onMomentUpdated: () {
+          if (mounted) {
+            ref.refresh(momentsProvider);
+          }
+        },
+      );
     } catch (e) {
       print('Error generating image: $e');
     } finally {

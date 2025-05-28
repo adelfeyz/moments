@@ -6,6 +6,7 @@ import '../services/token_storage_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'signup_page.dart';
+import '../services/migration_service.dart';
 
 class LoginPage extends StatefulWidget {
   @override
@@ -34,21 +35,32 @@ class _LoginPageState extends State<LoginPage> {
       if (res.isSignedIn) {
         try {
           final session = await Amplify.Auth.fetchAuthSession() as CognitoAuthSession;
-          if (session.isSignedIn && session.userPoolTokens != null) {
-            final tokens = session.userPoolTokens!;
+          if (session.isSignedIn && session.userPoolTokensResult.value != null) {
+            final tokens = session.userPoolTokensResult.value!;
             await TokenStorageService.saveTokens(
-              idToken: tokens.idToken.raw,
-              accessToken: tokens.accessToken.raw,
-              refreshToken: tokens.refreshToken,
+              idToken: tokens.idToken.toString(),
+              accessToken: tokens.accessToken.toString(),
+              refreshToken: tokens.refreshToken.toString(),
             );
+            
+            // Run migration to attach userId to existing moments
+            try {
+              await MigrationService.migrateToUserId();
+            } catch (e) {
+              debugPrint('Migration error after login: $e');
+            }
+            
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => HomePage()),
+              );
+            }
           }
         } catch (e) {
           debugPrint('Could not fetch/store tokens: $e');
+          _showError('Error saving login session');
         }
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => HomePage()),
-        );
       } else {
         _showError('Sign in not complete');
       }
@@ -56,19 +68,27 @@ class _LoginPageState extends State<LoginPage> {
       if (e.message.toLowerCase().contains('already signed in')) {
         try {
           final session = await Amplify.Auth.fetchAuthSession() as CognitoAuthSession;
-          if (session.isSignedIn && session.userPoolTokens != null) {
-            final tokens = session.userPoolTokens!;
+          if (session.isSignedIn && session.userPoolTokensResult.value != null) {
+            final tokens = session.userPoolTokensResult.value!;
             await TokenStorageService.saveTokens(
-              idToken: tokens.idToken.raw,
-              accessToken: tokens.accessToken.raw,
-              refreshToken: tokens.refreshToken,
+              idToken: tokens.idToken.toString(),
+              accessToken: tokens.accessToken.toString(),
+              refreshToken: tokens.refreshToken.toString(),
             );
-          }
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => HomePage()),
-            );
+            
+            // Run migration to attach userId to existing moments
+            try {
+              await MigrationService.migrateToUserId();
+            } catch (e) {
+              debugPrint('Migration error after login (already signed in): $e');
+            }
+            
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => HomePage()),
+              );
+            }
           }
         } catch (_) {
           _showError('Already signed in. Unable to proceed.');

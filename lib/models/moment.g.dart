@@ -19,19 +19,21 @@ class MomentAdapter extends TypeAdapter<Moment> {
     return Moment(
       id: fields[0] as String,
       title: fields[1] as String,
-      createdAt: fields[3] as DateTime,
+      createdAt: (fields[3] as DateTime?) ?? DateTime.now(),
       materials: (fields[4] as List).cast<MaterialItem>(),
       imagePath: fields[7] as String?,
     )
       ..description = fields[2] as String?
       ..tags = (fields[5] as List?)?.cast<String>()
-      ..isSynced = fields[6] as bool;
+      ..isSynced = fields[6] as bool?
+      ..updatedAt = (fields[8] as DateTime?) ?? DateTime.now()
+      ..isDeleted = fields[9] as bool?;
   }
 
   @override
   void write(BinaryWriter writer, Moment obj) {
     writer
-      ..writeByte(8)
+      ..writeByte(10)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -47,7 +49,11 @@ class MomentAdapter extends TypeAdapter<Moment> {
       ..writeByte(6)
       ..write(obj.isSynced)
       ..writeByte(7)
-      ..write(obj.imagePath);
+      ..write(obj.imagePath)
+      ..writeByte(8)
+      ..write(obj.updatedAt)
+      ..writeByte(9)
+      ..write(obj.isDeleted);
   }
 
   @override
@@ -76,13 +82,17 @@ class MaterialItemAdapter extends TypeAdapter<MaterialItem> {
       type: fields[1] as MomentMaterialType,
       content: fields[2] as String,
       transcript: fields[3] as String?,
+      id: fields[4] as String?,
+      updatedAt: (fields[5] as DateTime?) ?? DateTime.now(),
+      isDeleted: fields[6] as bool?,
+      isSynced: fields[7] as bool?,
     );
   }
 
   @override
   void write(BinaryWriter writer, MaterialItem obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(8)
       ..writeByte(0)
       ..write(obj.title)
       ..writeByte(1)
@@ -90,7 +100,15 @@ class MaterialItemAdapter extends TypeAdapter<MaterialItem> {
       ..writeByte(2)
       ..write(obj.content)
       ..writeByte(3)
-      ..write(obj.transcript);
+      ..write(obj.transcript)
+      ..writeByte(4)
+      ..write(obj.id)
+      ..writeByte(5)
+      ..write(obj.updatedAt)
+      ..writeByte(6)
+      ..write(obj.isDeleted)
+      ..writeByte(7)
+      ..write(obj.isSynced);
   }
 
   @override

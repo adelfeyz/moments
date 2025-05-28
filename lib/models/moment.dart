@@ -1,5 +1,6 @@
 import 'package:hive/hive.dart';
 import 'package:flutter/material.dart' show IconData, Icons;
+import 'package:uuid/uuid.dart';
 
 part 'moment.g.dart';
 
@@ -24,11 +25,20 @@ class Moment extends HiveObject {
   List<String>? tags;
   
   @HiveField(6)
-  bool isSynced = false;
+  bool? isSynced;
 
   @HiveField(7)
   String? imagePath;
   
+  @HiveField(8)
+  DateTime updatedAt;
+  
+  @HiveField(9)
+  bool? isDeleted;
+
+  @HiveField(10)
+  String? userId;
+
   // Constructors
   Moment({
     required this.id,
@@ -36,17 +46,27 @@ class Moment extends HiveObject {
     required this.createdAt,
     required this.materials,
     this.imagePath,
-  });
+    this.userId,
+  }) : updatedAt = DateTime.now() {
+    this.isDeleted = isDeleted ?? false;
+    this.isSynced = isSynced ?? false;
+  }
   
   Moment.create({
     String? title,
     List<MaterialItem>? materials,
     String? imagePath,
+    String? userId,
   }) : id = DateTime.now().millisecondsSinceEpoch.toString(),
        title = title ?? 'Untitled Moment',
        createdAt = DateTime.now(),
+       updatedAt = DateTime.now(),
        materials = materials ?? [],
-       imagePath = imagePath;
+       imagePath = imagePath,
+       userId = userId {
+         this.isDeleted = isDeleted ?? false;
+         this.isSynced = isSynced ?? false;
+       }
 
   // Helper getters for backward compatibility
   String? get audioPath => materials.isNotEmpty && materials.first.type == MomentMaterialType.voice 
@@ -72,12 +92,32 @@ class MaterialItem {
   @HiveField(3)
   final String? transcript;
 
+  @HiveField(4)
+  final String id;
+
+  @HiveField(5)
+  DateTime updatedAt;
+
+  @HiveField(6)
+  bool? isDeleted;
+
+  @HiveField(7)
+  bool? isSynced;
+
   MaterialItem({
     required this.title,
     required this.type,
     required this.content,
     this.transcript,
-  });
+    String? id,
+    DateTime? updatedAt,
+    this.isDeleted,
+    this.isSynced,
+  })  : id = id ?? const Uuid().v4(),
+        updatedAt = updatedAt ?? DateTime.now() {
+          this.isDeleted = isDeleted ?? false;
+          this.isSynced = isSynced ?? false;
+        }
 }
 
 @HiveType(typeId: 2)

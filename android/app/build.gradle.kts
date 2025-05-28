@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.moments"
+    namespace = "io.moments.app"
     compileSdk = flutter.compileSdkVersion
     // Override NDK version to satisfy path_provider_android and others
     ndkVersion = "27.0.12077973"
@@ -22,7 +22,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.moments"
+        applicationId = "io.moments.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
@@ -31,13 +31,20 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("C:\\Users\\adelf\\OneDrive\\Documents\\Moments\\key.jks")
+            storePassword = "Aa@123456"
+            keyAlias = "moments_key"
+            keyPassword = "Aa@123456"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = true
-            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

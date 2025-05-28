@@ -1,4 +1,4 @@
-package com.example.moments
+package io.moments.app
 
 import io.flutter.embedding.android.FlutterActivity
 

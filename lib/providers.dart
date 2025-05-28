@@ -30,7 +30,8 @@ final syncServiceProvider = Provider<SyncService>((ref) {
 // Get all moments
 final momentsProvider = FutureProvider.autoDispose<List<Moment>>((ref) async {
   final storageService = ref.watch(storageServiceProvider);
-  return await storageService.getAllMoments();
+  final all = await storageService.getAllMoments();
+  return all.where((m) => m.isDeleted != true).toList();
 });
 
 // Get a specific moment by ID

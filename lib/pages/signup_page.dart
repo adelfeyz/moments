@@ -33,7 +33,7 @@ class _SignupPageState extends State<SignupPage> {
       final res = await Amplify.Auth.signUp(
         username: _emailController.text.trim(),
         password: _passwordController.text,
-        options: CognitoSignUpOptions(userAttributes: {
+        options: SignUpOptions(userAttributes: {
           CognitoUserAttributeKey.email: _emailController.text.trim(),
           CognitoUserAttributeKey.name: _nameController.text.trim(),
         }),
