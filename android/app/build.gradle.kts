@@ -22,13 +22,13 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "io.moments.app"
+        applicationId = "io.moments.app" // Changed from com.example.moments
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        targetSdk = 34    // bump to 34
+        versionCode = 4        // ↑ bump from 3 to 4
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -54,8 +54,8 @@ android {
 }
 
 dependencies {
-    implementation("com.google.android.play:core:1.10.3")
-    implementation("com.google.android.play:core-ktx:1.8.1")
+    implementation("com.google.android.play:app-update:2.1.0")
+    implementation("com.google.android.play:app-update-ktx:2.1.0")
 }
 
 flutter {

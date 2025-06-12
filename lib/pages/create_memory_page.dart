@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -68,6 +69,8 @@ class _CreateMemoryPageState extends ConsumerState<CreateMemoryPage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      isDismissible: false,   // prevent tap‐outside close
+      enableDrag: false,      // prevent swipe‐down close
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -410,10 +413,36 @@ class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
   int _selectedStyle = -1;
   bool _isGeneratingImage = false;
 
+  // Add at top of state
+  Duration _recordDuration = Duration.zero;
+  Timer? _recordTimer;
+
   @override
   void dispose() {
     _textController.dispose();
+    _recordTimer?.cancel();
     super.dispose();
+  }
+
+  void _startTimer() {
+    _recordDuration = Duration.zero;
+    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() => _recordDuration += const Duration(seconds: 1));
+      }
+    });
+  }
+
+  void _stopTimer() {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+  }
+
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final m = two(d.inMinutes.remainder(60));
+    final s = two(d.inSeconds.remainder(60));
+    return '$m:$s';
   }
 
   Future<void> _toggleRecording() async {
@@ -436,13 +465,13 @@ class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
       // Enable wakelock before starting recording
       await WakelockPlus.enable();
       await captureService.startRecording();
-      print('[AddMaterialModal] Started recording');
-      if (mounted) {
-        setState(() => _isRecording = true);
-      }
+      _startTimer();
+      if (mounted) setState(() => _isRecording = true);
     } else {
       // Disable wakelock after stopping recording
       await WakelockPlus.disable();
+      _stopTimer();
+      if (mounted) setState(() => _isRecording = false);
       final path = await captureService.stopRecording();
       print('[AddMaterialModal] Stopped recording, path: \\${path}');
       if (mounted) {
@@ -576,9 +605,26 @@ class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
           16,
           MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 16,
         ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ←— Close button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.close, size: 24, color: Colors.grey[700]),
+                  onPressed: () {
+                    if (_isRecording) {
+                      _toggleRecording();   // stop if still recording
+                    }
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // …existing ElevatedButton.icon for recording …
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -594,8 +640,10 @@ class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
                     : Icon(_isRecording ? Icons.stop : Icons.mic, color: Colors.white, size: 28),
                 label: Text(
                   _isGeneratingImage
-                      ? 'Generating Picture...'
-                      : (_isRecording ? 'Stop Recording' : 'Start Recording'),
+                      ? 'Generating Picture…'
+                      : (_isRecording
+                          ? _formatDuration(_recordDuration)
+                          : 'Start Recording'),
                   style: TextStyle(fontSize: 20, color: Colors.white),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -607,26 +655,12 @@ class _AddMaterialModalState extends ConsumerState<AddMaterialModal> {
                   elevation: 0,
                 ),
                 onPressed: _isGeneratingImage ? null : _toggleRecording,
+              ),
             ),
-          ),
-            const SizedBox(height: 16),
-          Flexible(
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: tempMaterials.length,
-              itemBuilder: (context, index) {
-                final material = tempMaterials[index];
-                return ListTile(
-                  leading: Icon(material.type.icon),
-                  title: Text(material.content),
-                  subtitle: Text(material.type.label),
-                );
-              },
-            ),
-                ),
-              ],
-            ),
+            // …the rest of your tempMaterials list …
+          ],
+        ),
       ),
     );
   }
-} 
+}

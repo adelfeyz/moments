@@ -10,6 +10,7 @@ import 'package:amplify_flutter/amplify_flutter.dart';
 import '../services/token_storage_service.dart';
 import 'login_page.dart';
 import 'dart:io';
+import 'timeline_page.dart'; // add this import
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -215,7 +216,12 @@ class _HomePageState extends ConsumerState<HomePage> {
       bottomNavigationBar: BottomNavBar(
         currentIndex: 0,
         onTap: (index) {
-          // TODO: Implement navigation to other pages
+          if (index == 1) {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TimelinePage()),
+            );
+          }
+          // TODO: handle Settings (index == 2) and others
         },
       ),
     );

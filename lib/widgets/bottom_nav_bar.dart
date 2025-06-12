@@ -13,31 +13,22 @@ class BottomNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BottomNavigationBar(
-      type: BottomNavigationBarType.fixed,
       currentIndex: currentIndex,
       onTap: onTap,
-      selectedItemColor: Color(0xFF3730A3),
-      unselectedItemColor: Color(0xFF818CF8),
-      showSelectedLabels: true,
-      showUnselectedLabels: true,
-      items: [
+      items: const [
         BottomNavigationBarItem(
-          icon: Icon(Icons.menu_book),
-          label: 'Moments',
+          icon: Icon(Icons.home),
+          label: 'Home',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.timeline),
           label: 'Timeline',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.group),
-          label: 'People',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person),
-          label: 'Profile',
+          icon: Icon(Icons.settings),
+          label: 'Settings',
         ),
       ],
     );
   }
-} 
+}

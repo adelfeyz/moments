@@ -11,6 +11,8 @@ rootProject.layout.buildDirectory.value(newBuildDir)
 subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
+
+    // No additional forced versions required now that we use Play App Update 2.1.0
 }
 subprojects {
     project.evaluationDependsOn(":app")
